@@ -1,0 +1,272 @@
+// Database schema for multi-tenant SaaS platform
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  subdomain String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Subscription
+  stripeCustomerId       String?
+  stripeSubscriptionId   String?
+  stripePriceId          String?
+  subscriptionStatus     SubscriptionStatus @default(TRIAL)
+  trialEndsAt           DateTime?
+  subscriptionEndsAt    DateTime?
+  
+  // Relationships
+  users         User[]
+  websites      Website[]
+  testCases     TestCase[]
+  testRuns      TestRun[]
+  bugs          Bug[]
+  schedules     TestSchedule[]
+  
+  @@map("organizations")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  firstName    String?
+  lastName     String?
+  role         UserRole @default(MEMBER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  // Organization relationship
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  // Activity
+  websites Website[]
+  testRuns TestRun[]
+  bugs     Bug[]
+  
+  @@map("users")
+}
+
+model Website {
+  id          String   @id @default(cuid())
+  url         String
+  name        String?
+  description String?
+  status      WebsiteStatus @default(PENDING)
+  lastCrawled DateTime?
+  crawlDepth  Int      @default(3)
+  maxPages    Int      @default(50)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Organization relationship
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  // User relationship
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Relationships
+  pages     WebsitePage[]
+  testCases TestCase[]
+  testRuns  TestRun[]
+  
+  @@map("websites")
+}
+
+model WebsitePage {
+  id        String   @id @default(cuid())
+  url       String
+  title     String?
+  content   String?  // Extracted text content
+  metadata  Json?    // DOM structure, forms, buttons, etc.
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Website relationship
+  websiteId String
+  website   Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  
+  // Relationships
+  testCases TestCase[]
+  
+  @@map("website_pages")
+}
+
+model TestCase {
+  id          String     @id @default(cuid())
+  name        String
+  description String?
+  steps       Json       // Array of test steps
+  aiGenerated Boolean    @default(true)
+  status      TestStatus @default(DRAFT)
+  priority    Priority   @default(MEDIUM)
+  tags        String[]   @default([])
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  
+  // Relationships
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  websiteId String
+  website   Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  
+  pageId String?
+  page   WebsitePage? @relation(fields: [pageId], references: [id], onDelete: SetNull)
+  
+  // Test runs
+  testRuns TestRun[]
+  
+  @@map("test_cases")
+}
+
+model TestRun {
+  id          String        @id @default(cuid())
+  status      TestRunStatus @default(PENDING)
+  startedAt   DateTime?
+  completedAt DateTime?
+  duration    Int?          // Duration in milliseconds
+  results     Json?         // Detailed results
+  logs        Json?         // Console logs, network logs, etc.
+  screenshots String[]      @default([])
+  videos      String[]      @default([])
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  
+  // Relationships
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  websiteId String
+  website   Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  
+  testCaseId String
+  testCase   TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+  
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Bug reports
+  bugs Bug[]
+  
+  @@map("test_runs")
+}
+
+model Bug {
+  id          String     @id @default(cuid())
+  title       String
+  description String
+  severity    Severity   @default(MEDIUM)
+  status      BugStatus  @default(OPEN)
+  aiSummary   String?    // AI-generated summary
+  rootCause   String?    // AI-suggested root cause
+  steps       Json?      // Reproduction steps
+  logs        Json?      // Error logs
+  screenshots String[]   @default([])
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  
+  // Relationships
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  testRunId String
+  testRun   TestRun @relation(fields: [testRunId], references: [id], onDelete: Cascade)
+  
+  reportedBy String
+  reporter   User   @relation(fields: [reportedBy], references: [id], onDelete: Cascade)
+  
+  @@map("bugs")
+}
+
+model TestSchedule {
+  id          String         @id @default(cuid())
+  name        String
+  cron        String         // Cron expression
+  testCaseIds String[]       // Array of test case IDs
+  isActive    Boolean        @default(true)
+  lastRun     DateTime?
+  nextRun     DateTime?
+  timezone    String         @default("UTC")
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  
+  // Organization relationship
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  @@map("test_schedules")
+}
+
+// Enums
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  INCOMPLETE
+  INCOMPLETE_EXPIRED
+  TRIALING
+  UNPAID
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum WebsiteStatus {
+  PENDING
+  CRAWLING
+  COMPLETED
+  ERROR
+}
+
+enum TestStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum TestRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum Severity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum BugStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
